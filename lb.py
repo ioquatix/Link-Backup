@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- Mode: Python; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+
 """Link-Backup
 Copyright (c) 2004 Scott Ludwig
 http://www.scottlu.com
@@ -37,9 +40,6 @@ Options:
     --filelist <- or file> Specify filelist. Files relative to srcdir.
     --lock            Ensure only one backup to a given dest will run at a time
     --verbose         Show what is happening
-    --ssh-i <file>    Select id file to use for authentication (ssh -i)
-    --ssh-C           Use ssh compression (ssh -C)
-    --ssh-p <port>    ssh port on remote host (ssh -p)
 
 Comments:
 
@@ -118,6 +118,20 @@ created underneath the pictures-transfer directory, although it is not necessary
 since only the catalog is being updated (however it would be a speedup).
  
 History:
+
+v 0.83 17/Apr/2009 Samel Williams http://www.oriontransfer.co.nz/
+  - Collaboration with Scott to fix a bug that caused a crash
+    when a file changed (stat -> fstat)
+
+v 0.82 20/Oct/2008 Samuel Williams http://www.oriontransfer.co.nz/
+  - Removed --ssh-(x) options in favor of rsync style -e '...' style,
+    this makes the command compatible with rsync style syntax.
+
+v 0.81 6/Sep/2008 Samuel Williams http://www.oriontransfer.co.nz/
+  - Added mode-line and #! line
+  - Fixed parsing of command line arguments that contain spaces to match rsync
+    (shlex parsing)
+  - Fixed escaping of ssh strings so that they get passed correctly
 
 v 0.8 12/23/2006 scottlu
   - allow backups to occur while files are changing
@@ -205,6 +219,7 @@ import struct
 import re
 import glob
 import fcntl
+import shlex
 
 fd_send = None
 fd_recv = None
@@ -443,9 +458,9 @@ class Catalog:
                     # Update has and size and check to see if it already
                     # exists in the catalog
                     if md5hashes[n] != m.hexdigest():
-                        verbose_log('dst: file changed during copy %s' % filelist[n][0])        
+                        verbose_log('dst: file changed during copy %s' % filelist[n][0])
                         md5hashes[n] = m.hexdigest()
-                        s[SIZE] = os.stat(fd).st_size
+                        s[SIZE] = os.fstat(fd).st_size
                         if self.file_from_hashstat(md5hashes[n], s):
                             verbose_log('dst: file already in catalog %s' % filelist[n][0])
                             os.close(fd)
@@ -698,6 +713,15 @@ class Manager:
 
 # Helpers
 
+def dump_arg(x):
+    s = '"'
+    for c in x:
+        if c in '\\$"`':
+            s = s + '\\'
+        s = s + c
+    s = s + '"'
+    return s
+
 def start_server(src, dst, is_source):
     # Command line for server
 
@@ -706,7 +730,7 @@ def start_server(src, dst, is_source):
         cmd1 = "%s --source" % cmd1
     for arg in sys.argv[1:-2]:
         cmd1 = '%s %s' % (cmd1, arg)
-    cmd1 = "%s %s %s" % (cmd1, src['string'], dst['string'])
+    cmd1 = "%s %s %s" % (cmd1, dump_arg(src['string']), dump_arg(dst['string']))
 
     # Remote?
 
@@ -715,21 +739,16 @@ def start_server(src, dst, is_source):
         addr = src
 
     # Add ssh and args if remote
-
     if addr['remote']:
-        ssh_args = '%s \"%s\"' % (addr['remote'], cmd1)
-        if have_option('--ssh-p'):
-            ssh_args = '-p %s %s' % (get_option_value('--ssh-p'), ssh_args)
-        if have_option('--ssh-i'):
-            ssh_args = '-i %s %s' % (get_option_value('--ssh-i'), ssh_args)
-        if have_option('--ssh-C'):
-            ssh_args = '-C %s' % ssh_args
-        cmd2 = 'ssh %s' % ssh_args
+        ssh_args = '%s %s' % (addr['remote'], dump_arg(cmd1))
+        if have_option('-e'):
+                cmd2 = '%s %s' % (get_option_value('-e'), ssh_args)
+        else:
+                cmd2 = 'ssh %s' % ssh_args
     else:
         cmd2 = cmd1
 
     # Start and pass this code
-
     verbose_log('command: %s' % cmd2)
     fdin, fdout = os.popen2(cmd2, mode='b')
     init_io(fdin, fdout)
@@ -1025,7 +1044,6 @@ def execute(src, dst, is_source):
     else:
         # Receiving side
         # Recv filelist and name mapping, perform uid/gid mapping
-
         filelist = recv_object()
         idname_map = recv_object()
         map_uidgid(filelist, idname_map)
@@ -1148,6 +1166,11 @@ def parse_address(string):
     else:
         addr['remote'] = ''
         addr['path'] = string
+        
+    # Check to see if we are in quotes
+    # Unicode might be an issue here..
+    addr['path'] = shlex.split(addr['path'])[0]
+    
     return addr
 
 def have_option(option):
@@ -1163,7 +1186,7 @@ def get_option_value(option):
     return None
 
 def error(string):
-    sys.stderr.write(string)
+    sys.stderr.write("*** " + string + "\n")
     sys.exit(1)
 
 class LockFile:
@@ -1217,6 +1240,9 @@ if __name__ == '__main__':
     src = parse_address(sys.argv[-2:-1][0])
     dst = parse_address(sys.argv[-1:][0])
 
+    if have_option('--ssh-i') or have_option('--ssh-C') or have_option('--ssh-p'):
+        error("--ssh-x style options have been deprecated in favor of -e (rsync style). Please change your command.")
+
     # Is this the server?
 
     if have_option('--server'):
@@ -1253,14 +1279,14 @@ if __name__ == '__main__':
     if subdir != None:
         srcpath = '%s/' % os.path.normpath(src['path'])
         if (src['remote']):
-            srcpath = src['remote'] + ':' + srcpath
+            srcpath = src['remote'] + ':' + repr(srcpath)
         dstpath = os.path.normpath(join(dst['path'], subdir))
         if (dst['remote']):
-            dstpath = dst['remote'] + ':' + dstpath
+            dstpath = dst['remote'] + ':' + repr(dstpath)
         if os.getuid() == 0 and have_option('--numeric-ids'):
-            rsync_cmd = 'rsync -av --numeric-ids --dry-run "%s" "%s"' % (srcpath, dstpath)
+            rsync_cmd = 'rsync -av --numeric-ids --dry-run %s %s' % (dump_arg(srcpath), dump_arg(dstpath))
         else:
-            rsync_cmd = 'rsync -av --dry-run "%s" "%s"' % (srcpath, dstpath)
+            rsync_cmd = 'rsync -av --dry-run %s %s' % (dump_arg(srcpath), dump_arg(dstpath))
 
         if have_option('--verify'):
             print rsync_cmd
