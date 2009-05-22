@@ -289,6 +289,9 @@ class Log:
         return (time.strptime(m.group('time'), date_format), m.group('message'))
 
 class Catalog:
+    FMT_HASH = 8
+    FMT_MD5 = 16
+    
     """Central store for files of different hash/stat combinations
     Backup trees hard link to the catalog. The catalog can be updated
     incrementally. A backup tree is not created until the catalog is
@@ -303,6 +306,14 @@ class Catalog:
             os.mkdir(self.logpath)
             for n in xrange(256):
                 os.mkdir(join(self.path, '%03d' % n))
+
+    def catalog_format(self):
+        if os.path.exists(join(self.path, '000'))
+            return FMT_HASH
+        elif os.path.exists(join(self.path, '00'))
+            return FMT_MD5
+        else
+            return 0
 
     def get_logfiles(self):
         list = []
