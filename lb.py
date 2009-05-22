@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# -*- Mode: Python; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+# -*- Mode: Python; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 
 """Link-Backup
 Copyright (c) 2004 Scott Ludwig
@@ -461,6 +461,7 @@ class Catalog:
                         verbose_log('dst: file changed during copy %s' % filelist[n][0])
                         md5hashes[n] = m.hexdigest()
                         s[SIZE] = os.fstat(fd).st_size
+                        filelist[n] = (filepath_rel, s)
                         if self.file_from_hashstat(md5hashes[n], s):
                             verbose_log('dst: file already in catalog %s' % filelist[n][0])
                             os.close(fd)
